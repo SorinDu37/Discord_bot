@@ -1,0 +1,4 @@
+discord.log
+.env
+.venv/
+scripts/__pycache__
