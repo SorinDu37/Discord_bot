@@ -5,12 +5,13 @@ Sorin I. Gherasim
 """
 
 import discord
+import sqlite3
 from discord.ext import commands,tasks
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 
 LOOP_DELAY = 3.0
-
+DB_NAME = 'bot_database.db'
 
 logger = logging.getLogger('discord')
 
@@ -20,7 +21,10 @@ class VocalRewardEvents(commands.Cog) :
         self.bot = bot
         self.voice_trackers = {} #map user_id ->timestamp
 
-        self.reward_sweeper.start()
+        self.conn = sqlite3.connect(DB_NAME)
+        self.cursor = self.conn.cursor()
+
+        self.reward_sweeper.start() 
 
     @commands.Cog.listener()
     async def on_voice_state_update(self,member,before,after) :
@@ -43,10 +47,15 @@ class VocalRewardEvents(commands.Cog) :
                     )
             
             end_date = datetime.now()
-            duration = (end_date - join_time).total_seconds()
+            duration = (end_date - join_time).total_minutes()
 
+            seconds_left= duration % (LOOP_DELAY) #have the remaining EXP
+            exp_left = seconds_left#put it in minutes
+
+            self.reward(member.id, member.name, exp_left)
             logger.info(f"Tracking ended : {member.name}, left {before.channel.name} at {end_date}")
 
+        
     @tasks.loop(minutes= LOOP_DELAY)
     async def reward_sweeper(self):
         for guild in self.bot.guilds:
@@ -55,10 +64,19 @@ class VocalRewardEvents(commands.Cog) :
                 for member in voice_channel.members:
                     if member.bot or member.voice.self_mute  :
                         continue
+                    
+                    join_time = self.voice_trackers.get(member.id, None) #failsafe to make sure user has been online for at least 3 mins
+                    if ((join_time - datetime.now()).total_minutes >= LOOP_DELAY) :
+                        self.reward(member.id, member.name, LOOP_DELAY)
+                        logger.info(f"Awarded {LOOP_DELAY} minutes reward to {member.name} (ID : {member.id})")
 
-                    logger.info(f"Awarded {LOOP_DELAY} minutes reward to {member.name} (ID : {member.id})")
+    def reward(self, ID, name, exp) :
+        query = "INSERT into users (user_id, username, exp) VALUES (?,?,?)" #SQL query
+        user_data = (ID, name, exp)
 
-            
+        self.cursor.execute(query, user_data)
+        self.conn.commit()
+        
     def errors_logging(self, type, *args, **kwargs) :
         match type:
             case 'USER_LEFT_WITHOUT_JOIN' :
@@ -73,6 +91,7 @@ class VocalRewardEvents(commands.Cog) :
     async def before_sweeper(self):
         await self.bot.wait_until_ready()
 
-
+    def cog_unload(self):
+        self.conn.close()
 async def setup(bot):
     await bot.add_cog(VocalRewardEvents(bot))

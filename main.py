@@ -4,7 +4,7 @@ Main file of discord functionality bot. Developed by Sorin I. Gherasim.
 25/06/2026
 """
 
-from scripts import start_up,events
+from src import start_up,events
 
 if __name__ == '__main__' :
     handler,bot = start_up()

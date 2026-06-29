@@ -1,4 +1,4 @@
 discord.log
 .env
 .venv/
-scripts/__pycache__
+src/__pycache__
