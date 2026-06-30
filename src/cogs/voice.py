@@ -9,21 +9,20 @@ import sqlite3
 from discord.ext import commands,tasks
 from datetime import datetime, timedelta
 import logging
-
+from src.base_cog import DatabaseMixIn
 LOOP_DELAY = 3.0
 DB_NAME = 'bot_database.db'
 
 logger = logging.getLogger('discord')
 
-class VocalRewardEvents(commands.Cog) :
+class VocalRewardEvents(DatabaseMixIn, commands.Cog) :
 
-    def __init__(self,bot) : 
-        self.bot = bot
+    def __init__(self,bot, db_conn, queries) : 
+
+        DatabaseMixIn.__init__(self, bot, db_conn, queries)
+        commands.Cog.__init__(self)
+
         self.voice_trackers = {} #map user_id ->timestamp
-
-        self.conn = sqlite3.connect(DB_NAME)
-        self.cursor = self.conn.cursor()
-
         self.reward_sweeper.start() 
 
     @commands.Cog.listener()
@@ -67,16 +66,26 @@ class VocalRewardEvents(commands.Cog) :
                     
                     join_time = self.voice_trackers.get(member.id, None) #failsafe to make sure user has been online for at least 3 mins
                     if ((join_time - datetime.now()).total_minutes >= LOOP_DELAY) :
-                        self.reward(member.id, member.name, LOOP_DELAY)
+                        self.reward(member, LOOP_DELAY)
                         logger.info(f"Awarded {LOOP_DELAY} minutes reward to {member.name} (ID : {member.id})")
 
-    def reward(self, ID, name, exp) :
-        query = "INSERT into users (user_id, username, exp) VALUES (?,?,?)" #SQL query
+    async def reward(self, member, exp) :
+
+        #adding the new EXP to the user
+        query = self.queries.upsert_user #SQL query
+        ID = member.id
+        name = member.name
+    
         user_data = (ID, name, exp)
 
         self.cursor.execute(query, user_data)
-        self.conn.commit()
-        
+        self.conn.commit() 
+
+        progression_sister_cog = self.bot.get_cog("Progression")
+
+        if progression_sister_cog :
+            await progression_sister_cog.update_user_rank(member)
+
     def errors_logging(self, type, *args, **kwargs) :
         match type:
             case 'USER_LEFT_WITHOUT_JOIN' :
@@ -93,5 +102,3 @@ class VocalRewardEvents(commands.Cog) :
 
     def cog_unload(self):
         self.conn.close()
-async def setup(bot):
-    await bot.add_cog(VocalRewardEvents(bot))
